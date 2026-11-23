@@ -44,11 +44,11 @@ jobs:
       - name: Install Android API 36, Build Tools, and Emulator image
         run: |
           set -euo pipefail
-          sdkmanager --install \
-            "platforms;android-36" \
-            "build-tools;36.0.0" \
-            "platform-tools" \
-            "emulator" \
+          sdkmanager --install \\
+            "platforms;android-36" \\
+            "build-tools;36.0.0" \\
+            "platform-tools" \\
+            "emulator" \\
             "system-images;android-36;google_apis;x86_64"
 
       - name: Set up Gradle 9.6.0
@@ -72,26 +72,28 @@ jobs:
         run: ./gradlew --no-daemon clean assembleDebug
 
       - name: Launch on Android 16 emulator
-        timeout-minutes: 15
+        timeout-minutes: 25
         uses: reactivecircus/android-emulator-runner@v2
+        env:
+          ANDROID_I_WANT_MY_TCG: "yes"
         with:
           api-level: 36
           target: google_apis
           arch: x86_64
           profile: pixel_2
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          emulator-boot-timeout: 600
+          emulator-boot-timeout: 1200
           disable-animations: true
           script: |
             set -euo pipefail
             cd app-source/MJ-Video-Player
             adb wait-for-device
             for i in $(seq 1 120); do
-              booted="$(adb shell getprop sys.boot_completed | tr -d '\r')"
+              booted="$(adb shell getprop sys.boot_completed | tr -d '\\r')"
               [ "$booted" = "1" ] && break
               sleep 2
             done
-            [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]
+            [ "$(adb shell getprop sys.boot_completed | tr -d '\\r')" = "1" ]
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell am force-stop com.mjstudio.videoplayer || true
             adb shell monkey -p com.mjstudio.videoplayer 1

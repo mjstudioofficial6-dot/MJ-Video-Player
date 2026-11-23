@@ -80,6 +80,7 @@ jobs:
             echo 'ERROR: /dev/kvm is unavailable on the runner.'
             exit 1
           fi
+
       - name: Launch APK on Android 16 emulator
         uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
@@ -95,9 +96,53 @@ jobs:
           disable-linux-hw-accel: false
           emulator-boot-timeout: 600
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
-          pre-emulator-launch-script: bash "$GITHUB_WORKSPACE/build-source/ci/emulator-prelaunch-diagnostics.sh"
-          script: bash "$GITHUB_WORKSPACE/build-source/ci/emulator-smoke-test.sh"
+          script: |
+            set -euo pipefail
+            APP_DIR="$GITHUB_WORKSPACE/app-source/MJ-Video-Player"
+            APK="$APP_DIR/app/build/outputs/apk/debug/app-debug.apk"
+            AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+            test -f "$APK"
+            test -x "$AAPT"
 
+            adb wait-for-device
+            BOOT_COMPLETED=""
+            for attempt in $(seq 1 60); do
+              BOOT_COMPLETED="$(adb shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')"
+              if [ "$BOOT_COMPLETED" = "1" ]; then
+                break
+              fi
+              sleep 2
+            done
+            if [ "$BOOT_COMPLETED" != "1" ]; then
+              echo "ERROR: Android emulator did not finish booting."
+              exit 1
+            fi
+
+            PACKAGE="$("$AAPT" dump badging "$APK" | sed -n "s/^package: name='\([^']*\)'.*/\1/p" | head -n 1)"
+            if [ -z "$PACKAGE" ]; then
+              echo "ERROR: Could not read the APK package name."
+              exit 1
+            fi
+
+            mkdir -p "$APP_DIR"
+            adb install -r "$APK"
+            adb logcat -c
+            adb shell monkey -p "$PACKAGE" -c android.intent.category.LAUNCHER 1
+            sleep 15
+
+            if ! adb shell pidof "$PACKAGE" >/dev/null 2>&1; then
+              echo "ERROR: App process is not running after launch."
+              adb logcat -d -v time > "$APP_DIR/smoke-test-logcat.txt"
+              exit 1
+            fi
+
+            adb shell dumpsys activity activities > "$APP_DIR/activity-dump.txt"
+            adb logcat -d -v time > "$APP_DIR/smoke-test-logcat.txt"
+            if ! grep -Fq "$PACKAGE" "$APP_DIR/activity-dump.txt"; then
+              echo "ERROR: App activity was not found in the activity dump."
+              exit 1
+            fi
+            echo "PASS: $PACKAGE installed, launched, and remained running for 15 seconds."
 
       - name: Upload APK and generated wrapper
         if: always()

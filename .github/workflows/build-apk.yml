@@ -72,20 +72,29 @@ jobs:
         run: ./gradlew --no-daemon clean assembleDebug
 
       - name: Launch on Android 16 emulator
+        timeout-minutes: 15
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 36
           target: google_apis
           arch: x86_64
           profile: pixel_2
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
+          emulator-boot-timeout: 600
           disable-animations: true
           script: |
             set -euo pipefail
             cd app-source/MJ-Video-Player
             adb wait-for-device
+            for i in $(seq 1 120); do
+              booted="$(adb shell getprop sys.boot_completed | tr -d '\r')"
+              [ "$booted" = "1" ] && break
+              sleep 2
+            done
+            [ "$(adb shell getprop sys.boot_completed | tr -d '\r')" = "1" ]
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell am force-stop com.mjstudio.videoplayer || true
-            adb shell am start -n com.mjstudio.videoplayer/.MainActivity
+            adb shell monkey -p com.mjstudio.videoplayer 1
             sleep 15
             adb shell pidof com.mjstudio.videoplayer
             adb shell dumpsys activity activities | grep -q "com.mjstudio.videoplayer"

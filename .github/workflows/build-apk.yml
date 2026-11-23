@@ -13,7 +13,7 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 40
+    timeout-minutes: 50
 
     steps:
       - name: Checkout
@@ -44,12 +44,7 @@ jobs:
       - name: Install Android API 36, Build Tools, and Emulator image
         run: |
           set -euo pipefail
-          sdkmanager --install \\
-            "platforms;android-36" \\
-            "build-tools;36.0.0" \\
-            "platform-tools" \\
-            "emulator" \\
-            "system-images;android-36;google_apis;x86_64"
+          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "platform-tools" "emulator" "system-images;android-36;google_apis;x86_64"
 
       - name: Set up Gradle 9.6.0
         uses: gradle/actions/setup-gradle@v4
@@ -71,16 +66,33 @@ jobs:
         working-directory: app-source/MJ-Video-Player
         run: ./gradlew --no-daemon clean assembleDebug
 
+      - name: Enable KVM or prepare the supported TCG fallback
+        run: |
+          set -euo pipefail
+          if [ -e /dev/kvm ]; then
+            sudo mkdir -p /etc/udev/rules.d
+            printf 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"\n' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+            sudo udevadm control --reload-rules
+            sudo udevadm trigger --name-match=kvm
+            sudo chmod 0666 /dev/kvm || true
+          fi
+
+          if [ -r /dev/kvm ] && [ -w /dev/kvm ]; then
+            echo "KVM is readable and writable; emulator will use hardware acceleration."
+          else
+            echo "::warning::KVM is unavailable; allowing Android Emulator's TCG software fallback."
+            echo "ANDROID_I_WANT_MY_TCG=yes" >> "$GITHUB_ENV"
+          fi
+
       - name: Launch on Android 16 emulator
-        timeout-minutes: 25
+        timeout-minutes: 30
         uses: reactivecircus/android-emulator-runner@v2
-        env:
-          ANDROID_I_WANT_MY_TCG: "yes"
         with:
           api-level: 36
           target: google_apis
           arch: x86_64
           profile: pixel_2
+          disable-linux-hw-accel: auto
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
           emulator-boot-timeout: 1200
           disable-animations: true
@@ -89,17 +101,18 @@ jobs:
             cd app-source/MJ-Video-Player
             adb wait-for-device
             for i in $(seq 1 120); do
-              booted="$(adb shell getprop sys.boot_completed | tr -d '\\r')"
+              booted="$(adb shell getprop sys.boot_completed | tr -d '\r\n')"
               [ "$booted" = "1" ] && break
               sleep 2
             done
-            [ "$(adb shell getprop sys.boot_completed | tr -d '\\r')" = "1" ]
+            [ "$(adb shell getprop sys.boot_completed | tr -d '\r\n')" = "1" ]
             adb install -r app/build/outputs/apk/debug/app-debug.apk
             adb shell am force-stop com.mjstudio.videoplayer || true
             adb shell monkey -p com.mjstudio.videoplayer 1
             sleep 15
             adb shell pidof com.mjstudio.videoplayer
-            adb shell dumpsys activity activities | grep -q "com.mjstudio.videoplayer"
+            adb shell dumpsys activity activities > activity-dump.txt
+            grep -qF "com.mjstudio.videoplayer" activity-dump.txt
             adb logcat -d -t 3000 > smoke-test-logcat.txt
 
       - name: Upload APK and generated wrapper
@@ -113,5 +126,6 @@ jobs:
             app-source/MJ-Video-Player/gradlew.bat
             app-source/MJ-Video-Player/gradle/wrapper/gradle-wrapper.jar
             app-source/MJ-Video-Player/gradle/wrapper/gradle-wrapper.properties
+            app-source/MJ-Video-Player/activity-dump.txt
             app-source/MJ-Video-Player/smoke-test-logcat.txt
           if-no-files-found: warn

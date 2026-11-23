@@ -84,36 +84,24 @@ jobs:
             echo "ANDROID_I_WANT_MY_TCG=yes" >> "$GITHUB_ENV"
           fi
 
-      - name: Launch on Android 16 emulator
-        timeout-minutes: 30
-        uses: reactivecircus/android-emulator-runner@v2
+      - name: Launch APK on Android 16 emulator
+        uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
+          working-directory: ${{ github.workspace }}
           api-level: 36
-          target: google_apis
+          system-image-api-level: 36
+          target: default
           arch: x86_64
-          profile: pixel_2
-          disable-linux-hw-accel: auto
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim
-          emulator-boot-timeout: 1200
+          avd-name: mj-api36
+          cores: 2
+          ram-size: 2048M
           disable-animations: true
-          script: |
-            set -euo pipefail
-            cd app-source/MJ-Video-Player
-            adb wait-for-device
-            for i in $(seq 1 120); do
-              booted="$(adb shell getprop sys.boot_completed | tr -d '\r\n')"
-              [ "$booted" = "1" ] && break
-              sleep 2
-            done
-            [ "$(adb shell getprop sys.boot_completed | tr -d '\r\n')" = "1" ]
-            adb install -r app/build/outputs/apk/debug/app-debug.apk
-            adb shell am force-stop com.mjstudio.videoplayer || true
-            adb shell monkey -p com.mjstudio.videoplayer 1
-            sleep 15
-            adb shell pidof com.mjstudio.videoplayer
-            adb shell dumpsys activity activities > activity-dump.txt
-            grep -qF "com.mjstudio.videoplayer" activity-dump.txt
-            adb logcat -d -t 3000 > smoke-test-logcat.txt
+          disable-linux-hw-accel: false
+          emulator-boot-timeout: 600
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          pre-emulator-launch-script: bash "$GITHUB_WORKSPACE/build-source/ci/emulator-prelaunch-diagnostics.sh"
+          script: bash "$GITHUB_WORKSPACE/build-source/ci/emulator-smoke-test.sh"
+
 
       - name: Upload APK and generated wrapper
         if: always()

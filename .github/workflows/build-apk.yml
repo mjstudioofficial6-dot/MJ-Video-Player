@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "MJ-Video-Player-source.zip"
+      - "MJ-Video-Player-source(2).zip"
       - ".github/workflows/build-apk.yml"
 
 permissions:
@@ -19,10 +19,10 @@ jobs:
 
       - name: Verify and extract source ZIP
         run: |
-          test -f MJ-Video-Player-source.zip
-          unzip -t MJ-Video-Player-source.zip
+          test -f MJ-Video-Player-source(2).zip
+          unzip -t MJ-Video-Player-source(2).zip
           mkdir -p app-source
-          unzip -q MJ-Video-Player-source.zip -d app-source
+          unzip -q MJ-Video-Player-source(2).zip -d app-source
           test -f app-source/MJ-Video-Player/settings.gradle.kts
 
       - name: Set up JDK 17

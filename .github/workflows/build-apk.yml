@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
   push:
     paths:
-      - "MJ-Video-Player-Source-Code.zip"
+      - "MJ-Video-Player-Source-Code-Fixed.zip"
       - ".github/workflows/build-apk.yml"
 
 permissions:
@@ -23,7 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          SOURCE_ARCHIVE="MJ-Video-Player-Source-Code.zip"
+          SOURCE_ARCHIVE="MJ-Video-Player-Source-Code-Fixed.zip"
           if [ ! -f "$SOURCE_ARCHIVE" ]; then
             echo "ERROR: $SOURCE_ARCHIVE was not found in the repository root."
             echo "Upload the Source Code ZIP to the root of the GitHub repository."

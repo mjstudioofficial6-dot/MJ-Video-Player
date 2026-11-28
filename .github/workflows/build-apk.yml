@@ -17,94 +17,130 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      - name: Check and extract Android source ZIP
+      - name: Verify and extract Android source ZIP
         shell: bash
         run: |
           set -euo pipefail
           SOURCE_ARCHIVE="MJ-Video-Player-Source-Code-Fixed.zip"
           if [ ! -f "$SOURCE_ARCHIVE" ]; then
-            echo "ERROR: $SOURCE_ARCHIVE was not found in the repository root."
-            echo "Upload the Source Code ZIP to the root of the GitHub repository."
+            echo "ERROR: $SOURCE_ARCHIVE is missing from the repository root."
             exit 1
           fi
+
           unzip -t "$SOURCE_ARCHIVE"
           unzip -q -o "$SOURCE_ARCHIVE" -d "$GITHUB_WORKSPACE"
+
           test -f settings.gradle.kts
           test -f build.gradle.kts
+          test -f gradle.properties
+          test -f gradlew
+          chmod +x gradlew
+          test -f gradlew.bat
+          test -f gradle/wrapper/gradle-wrapper.jar
           test -f gradle/wrapper/gradle-wrapper.properties
           test -f app/build.gradle.kts
           test -f app/src/main/AndroidManifest.xml
-          echo "Android source ZIP extracted successfully into the repository root."
-          echo "Project files found:"
-          ls -la
+          test -f app/src/main/java/com/mjstudio/videoplayer/MainActivity.java
+          test -f app/src/main/res/values/strings.xml
+          test -f app/src/main/res/values/styles.xml
+
+          grep -Fq 'id("com.android.application") version "9.4.0"' build.gradle.kts
+          grep -Fq 'compileSdk = 36' app/build.gradle.kts
+          grep -Fq 'buildToolsVersion = "36.0.0"' app/build.gradle.kts
+          grep -Fq 'minSdk = 23' app/build.gradle.kts
+          grep -Fq 'targetSdk = 36' app/build.gradle.kts
+          grep -Fq 'sourceCompatibility = JavaVersion.VERSION_17' app/build.gradle.kts
+          grep -Fq 'targetCompatibility = JavaVersion.VERSION_17' app/build.gradle.kts
+          grep -Fq 'androidx.annotation:annotation:1.10.0' app/build.gradle.kts
+          grep -Fq 'androidx.media3:media3-exoplayer:1.11.1' app/build.gradle.kts
+          grep -Fq 'androidx.media3:media3-ui:1.11.1' app/build.gradle.kts
+          grep -Fq 'distributionUrl=https\://services.gradle.org/distributions/gradle-9.6.0-bin.zip' gradle/wrapper/gradle-wrapper.properties
+          grep -Fq 'distributionSha256Sum=bbaeb2fef8710818cf0e261201dab964c572f92b942812df0c3620d62a529a01' gradle/wrapper/gradle-wrapper.properties
+          echo "Source ZIP structure and pinned project versions verified."
 
       - name: Set up JDK 17 (Temurin)
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "17"
 
       - name: Set up Android SDK
-        uses: android-actions/setup-android@v4
+        uses: android-actions/setup-android@v4.0.4
         with:
           cmdline-tools-version: "15859902"
-          packages: "platform-tools"
 
       - name: Install Android API 36 and Build Tools 36.0.0
         shell: bash
         run: |
           set -euo pipefail
-          yes | sdkmanager --licenses >/dev/null || true
-          sdkmanager --install "platforms;android-36" "build-tools;36.0.0" "platform-tools"
+          sdkmanager --install "platforms;android-36" "build-tools;36.0.0"
 
-      - name: Verify official Gradle 9.6.0 distribution checksum
-        shell: bash
-        run: |
-          set -euo pipefail
-          EXPECTED="bbaeb2fef8710818cf0e261201dab964c572f92b942812df0c3620d62a529a01"
-          PUBLISHED="$(curl --fail --silent --show-error --location https://services.gradle.org/distributions/gradle-9.6.0-bin.zip.sha256)"
-          test "$PUBLISHED" = "$EXPECTED"
-          echo "Gradle 9.6.0 published checksum matches the pinned baseline."
+      - name: Set up Gradle cache
+        uses: gradle/actions/setup-gradle@v6
+        with:
+          cache-provider: basic
 
-      - name: Generate and verify genuine Gradle 9.6.0 Wrapper
+      - name: Verify official Gradle and Wrapper checksums
         shell: bash
         run: |
           set -euo pipefail
           GRADLE_SHA="bbaeb2fef8710818cf0e261201dab964c572f92b942812df0c3620d62a529a01"
           WRAPPER_SHA="497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7"
-          curl --fail --silent --show-error --location \
-            https://services.gradle.org/distributions/gradle-9.6.0-bin.zip \
-            --output /tmp/gradle-9.6.0-bin.zip
-          printf '%s  %s\n' "$GRADLE_SHA" /tmp/gradle-9.6.0-bin.zip | sha256sum --check
-          unzip -q /tmp/gradle-9.6.0-bin.zip -d /tmp
-          /tmp/gradle-9.6.0/bin/gradle wrapper \
-            --gradle-version 9.6.0 \
-            --distribution-type bin \
-            --gradle-distribution-sha256-sum "$GRADLE_SHA"
-          chmod +x gradlew
-          printf '%s  %s\n' "$WRAPPER_SHA" gradle/wrapper/gradle-wrapper.jar | sha256sum --check
-          grep -Fq 'gradle-9.6.0-bin.zip' gradle/wrapper/gradle-wrapper.properties
-          grep -Fq "$GRADLE_SHA" gradle/wrapper/gradle-wrapper.properties
-          ./gradlew --version
 
-      - name: Build debug APK
+          PUBLISHED_SHA="$(curl --fail --silent --show-error --location \
+            --retry 5 --retry-all-errors --retry-delay 3 \
+            https://services.gradle.org/distributions/gradle-9.6.0-bin.zip.sha256)"
+          test "$PUBLISHED_SHA" = "$GRADLE_SHA"
+          printf '%s  %s\n' "$WRAPPER_SHA" gradle/wrapper/gradle-wrapper.jar | sha256sum --check
+          grep -Fq "distributionSha256Sum=$GRADLE_SHA" gradle/wrapper/gradle-wrapper.properties
+          echo "Official Gradle distribution and Wrapper JAR checksums match."
+
+      - name: Verify Gradle Wrapper runtime
         shell: bash
         run: |
           set -euo pipefail
-          ./gradlew --no-daemon --stacktrace clean assembleDebug
+          ./gradlew --version
+
+      - name: Build debug APK
+        id: build-apk
+        shell: bash
+        run: |
+          set -euo pipefail
+          BUILD_OK=0
+          for attempt in 1 2 3; do
+            echo "Gradle build attempt $attempt of 3"
+            if ./gradlew --no-daemon --max-workers=2 --stacktrace clean assembleDebug 2>&1 | tee "$RUNNER_TEMP/gradle-build.log"; then
+              BUILD_OK=1
+              break
+            fi
+
+            TRANSIENT_ERROR='Received status code (429|500|502|503|504)|Too Many Requests|Connection reset|SocketTimeoutException|ConnectTimeoutException|UnknownHostException|Temporary failure in name resolution|timed out'
+            if ! grep -Eqi "$TRANSIENT_ERROR" "$RUNNER_TEMP/gradle-build.log"; then
+              echo "Build failed for a non-transient reason; not retrying."
+              exit 1
+            fi
+            if [ "$attempt" -lt 3 ]; then
+              sleep $((attempt * 30))
+            fi
+          done
+          test "$BUILD_OK" = "1"
+
           APK="app/build/outputs/apk/debug/app-debug.apk"
           test -s "$APK"
-          "$ANDROID_HOME/build-tools/36.0.0/aapt" dump badging "$APK" | grep -F "package: name='com.mjstudio.videoplayer'"
-          if "$ANDROID_HOME/build-tools/36.0.0/aapt" dump permissions "$APK" | grep -F 'android.permission.INTERNET'; then
-            echo "Offline APK unexpectedly requests INTERNET permission."
+          AAPT="$ANDROID_HOME/build-tools/36.0.0/aapt"
+          "$AAPT" dump badging "$APK" | grep -F "package: name='com.mjstudio.videoplayer'"
+          "$AAPT" dump badging "$APK" | grep -F "launchable-activity: name='com.mjstudio.videoplayer.MainActivity'"
+          if "$AAPT" dump permissions "$APK" | grep -F 'android.permission.INTERNET'; then
+            echo "ERROR: Offline app unexpectedly requests INTERNET permission."
             exit 1
           fi
           ls -lh "$APK"
+          echo "apk_ready=true" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test on Android 16 emulator
-        uses: reactivecircus/android-emulator-runner@v2
+        uses: reactivecircus/android-emulator-runner@v2.38.0
         with:
           api-level: 36
           target: google_apis
@@ -115,30 +151,31 @@ jobs:
           script: |
             set -euo pipefail
             APK="app/build/outputs/apk/debug/app-debug.apk"
+            adb wait-for-device
             adb install -r "$APK"
+            adb logcat -c
             adb shell am force-stop com.mjstudio.videoplayer
             adb shell am start -W -n com.mjstudio.videoplayer/.MainActivity
             sleep 15
+
             PID="$(adb shell pidof com.mjstudio.videoplayer | tr -d '\r')"
             test -n "$PID"
-            adb shell dumpsys activity activities | grep -E 'mResumedActivity|topResumedActivity' | grep -F 'com.mjstudio.videoplayer/.MainActivity'
+            adb shell dumpsys activity activities \
+              | grep -E 'mResumedActivity|topResumedActivity' \
+              | grep -F 'com.mjstudio.videoplayer/.MainActivity'
+
             APP_LOG="$(adb logcat -d --pid="$PID" -t 3000)"
             if printf '%s' "$APP_LOG" | grep -E 'FATAL EXCEPTION|Process: com\.mjstudio\.videoplayer'; then
-              echo "MJ Video Player crashed during the smoke test."
+              echo "ERROR: MJ Video Player crashed during the smoke test."
               exit 1
             fi
-            echo "App stayed installed, running, and resumed for 15 seconds."
+            echo "PASS: app installed, launched, and remained resumed for 15 seconds."
 
-      - name: Upload APK and generated Gradle Wrapper
-        if: always()
-        uses: actions/upload-artifact@v4
+      - name: Upload debug APK
+        if: always() && steps.build-apk.outputs.apk_ready == 'true'
+        uses: actions/upload-artifact@v7.0.2
         with:
-          name: MJ-Video-Player-APK-and-Gradle-Wrapper
-          path: |
-            app/build/outputs/apk/debug/app-debug.apk
-            gradlew
-            gradlew.bat
-            gradle/wrapper/gradle-wrapper.jar
-            gradle/wrapper/gradle-wrapper.properties
-          if-no-files-found: warn
+          name: MJ-Video-Player-APK
+          path: app/build/outputs/apk/debug/app-debug.apk
+          if-no-files-found: error
           retention-days: 14
